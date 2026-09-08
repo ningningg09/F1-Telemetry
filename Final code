@@ -1,0 +1,245 @@
+#include <LiquidCrystal.h>
+#include <IRremote.hpp>
+
+// =========================
+// LCD
+// RS, E, D4, D5, D6, D7
+// =========================
+LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
+
+// =========================
+// ULTRASONIC SENSOR
+// =========================
+const int trigPin = 6;
+const int echoPin = 5;
+
+unsigned long duration;
+float distance;
+
+// =========================
+// HALL SENSOR
+// =========================
+const int hallPin = A0;
+
+// Wheel diameter = 2.2 cm = 0.022 m
+const float wheelDiameter = 0.022;
+const float circumference = PI * wheelDiameter;
+
+// Your Hall sensor readings:
+// Magnet away ≈ 158
+// Magnet close ≈ 175
+const int magnetThreshold = 167;
+const int magnetReset = 163;
+
+unsigned long rotations = 0;
+bool magnetDetected = false;
+
+unsigned long lastSpeedTime = 0;
+
+float rpm = 0;
+float speedKmh = 0;
+
+// =========================
+// IR REMOTE
+// =========================
+const int IR_RECEIVE_PIN = 2;
+
+// Your remote button gives command 18
+const uint32_t BUTTON_SWITCH = 0x18;
+
+int screen = 0;
+
+// =========================
+// SETUP
+// =========================
+void setup() {
+
+  // LCD
+  lcd.begin(16, 2);
+  lcd.clear();
+
+  // Ultrasonic
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Serial Monitor
+  Serial.begin(115200);
+
+  // IR receiver
+  IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
+
+  // Startup message
+  lcd.setCursor(0, 0);
+  lcd.print("F1 Sensor");
+  lcd.setCursor(0, 1);
+  lcd.print("Starting...");
+
+  delay(1500);
+
+  lcd.clear();
+
+  lastSpeedTime = millis();
+}
+
+// =========================
+// MAIN LOOP
+// =========================
+void loop() {
+
+  // -------------------------
+  // ULTRASONIC DISTANCE
+  // -------------------------
+
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+
+  if (duration == 0) {
+    distance = 0;
+  }
+  else {
+    distance = duration * 0.034 / 2;
+  }
+
+
+  // -------------------------
+  // HALL SENSOR
+  // -------------------------
+
+  int sensorValue = analogRead(hallPin);
+
+  // Magnet detected
+  if (sensorValue > magnetThreshold && !magnetDetected) {
+
+    magnetDetected = true;
+
+    rotations++;
+
+  }
+
+  // Magnet moved away
+  if (sensorValue < magnetReset) {
+
+    magnetDetected = false;
+
+  }
+
+
+  // -------------------------
+  // CALCULATE RPM + SPEED
+  // EVERY 1 SECOND
+  // -------------------------
+
+  if (millis() - lastSpeedTime >= 1000) {
+
+    unsigned long r = rotations;
+
+    // Reset rotation counter
+    rotations = 0;
+
+    // Rotations per second
+    float rotationsPerSecond = r;
+
+    // RPM
+    rpm = rotationsPerSecond * 60.0;
+
+    // Speed in m/s
+    float speed = rotationsPerSecond * circumference;
+
+    // Convert m/s to km/h
+    speedKmh = speed * 3.6;
+
+    lastSpeedTime = millis();
+
+  }
+
+
+  // -------------------------
+  // IR REMOTE
+  // -------------------------
+
+  if (IrReceiver.decode()) {
+
+    uint32_t command = IrReceiver.decodedIRData.command;
+
+    Serial.print("Remote command: ");
+    Serial.println(command, HEX);
+
+    // Button 18 switches screen
+    if (command == BUTTON_SWITCH) {
+
+      screen++;
+
+      if (screen > 1) {
+        screen = 0;
+      }
+
+      lcd.clear();
+
+    }
+
+    IrReceiver.resume();
+
+  }
+
+
+  // -------------------------
+  // LCD DISPLAY
+  // -------------------------
+
+  if (screen == 0) {
+
+    // Screen 0 = Distance
+
+    lcd.setCursor(0, 0);
+    lcd.print("Distance:");
+
+    lcd.setCursor(0, 1);
+    lcd.print(distance, 1);
+    lcd.print(" cm       ");
+
+  }
+
+  else if (screen == 1) {
+
+    // Screen 1 = RPM + Speed
+
+    lcd.setCursor(0, 0);
+    lcd.print("RPM:");
+    lcd.print(rpm, 0);
+    lcd.print("       ");
+
+    lcd.setCursor(0, 1);
+    lcd.print(speedKmh, 2);
+    lcd.print(" km/h    ");
+
+  }
+
+
+  // -------------------------
+  // SERIAL MONITOR
+  // -------------------------
+
+  Serial.print("Hall: ");
+  Serial.print(sensorValue);
+
+  Serial.print(" | Distance: ");
+  Serial.print(distance, 1);
+  Serial.print(" cm");
+
+  Serial.print(" | RPM: ");
+  Serial.print(rpm, 0);
+
+  Serial.print(" | Speed: ");
+  Serial.print(speedKmh, 2);
+  Serial.println(" km/h");
+
+
+  delay(100);
+}
